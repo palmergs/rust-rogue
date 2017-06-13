@@ -1,77 +1,53 @@
 extern crate tcod;
-extern crate rand;
 
-use tcod::{ Console, RootConsole, BackgroundFlag };
-use tcod::input::KeyCode;
-use tcod::colors::Color;
-use rand::{ thread_rng, Rng };
+use tcod::console::*;
+use tcod::colors;
+use tcod::input::Key;
+use tcod::input::KeyCode::*;
 
-mod bound;
-use bound::{ Point, Bound, Contains };
+const SCREEN_WIDTH: i32 = 80;
+const SCREEN_HEIGHT: i32 = 50;
+const LIMIT_FPS: i32 = 20;
 
-
-fn render(root: &mut RootConsole, char_pt: &Point, dog_pt: &Point) {
-    root.clear();
-    root.put_char(char_pt.col, char_pt.row, '@', BackgroundFlag::Set);
-    root.put_char(dog_pt.col, dog_pt.row, 'd', BackgroundFlag::Set);
-    root.flush();
+fn handle_keys(root: &mut Root, player_x: &mut i32, player_y: &mut i32) -> bool {
+    let key = root.wait_for_keypress(true);
+    match key {
+        Key { code: Up, .. } => *player_y -= 1,
+        Key { code: Down, .. } => *player_y += 1,
+        Key { code: Left, .. } => *player_x -= 1,
+        Key { code: Right, .. } => *player_x += 1,
+        Key { code: Enter, alt: true, .. } => {
+            let fullscreen = root.is_fullscreen();
+            root.set_fullscreen(!fullscreen);
+        },
+        Key { code: Escape, .. } => return true,
+        _ => {},
+    }
+    false
 }
 
 fn main() {
+    let mut root = Root::initializer()
+            .font("arial10x10.png", FontLayout::Tcod)
+            .font_type(FontType::Greyscale)
+            .size(SCREEN_WIDTH, SCREEN_HEIGHT)
+            .title("Tutorial")
+            .init();
 
-    let window_bounds = Bound { min: Point { row: 0, col: 0 }, max: Point { row: 50i32, col: 80i32 } };
+    tcod::system::set_fps(LIMIT_FPS);
 
-    let mut root = RootConsole::initializer().size(window_bounds.max.col, window_bounds.max.row).init();
-    let mut rng = thread_rng();
-    let mut exit = false;
-    
-    // set default colors
-    root.set_default_background(Color::new(0, 0, 0));
-    root.set_default_foreground(Color::new(255, 255, 255));
-
-    // initialize character
-    let mut char_pt = Point { col: 40i32, row: 25i32 };
-    let mut dog_pt = Point { col: 38i32, row: 23i32 };
-
-    // initialize screen
-    render(&mut root, &char_pt, &dog_pt);
-
-    while !root.window_closed() && !exit {
-
-        // wait for input
-        let keypress = root.wait_for_keypress(true);
-
-        // update game
-        let mut offset = Point { row: 0, col: 0 };
-        match keypress.code {
-            KeyCode::Escape =>  exit = true,
-            KeyCode::Up =>      offset.row = -1,
-            KeyCode::NumPad8 => offset.row = -1,
-            KeyCode::Down =>    offset.row = 1,
-            KeyCode::NumPad2 => offset.row = 1,
-            KeyCode::Left =>    offset.col = -1,
-            KeyCode::NumPad4 => offset.col = -1,
-            KeyCode::Right =>   offset.col = 1,
-            KeyCode::NumPad6 => offset.col = 1,
-            KeyCode::NumPad7 => { offset.col = -1; offset.row = -1 },
-            KeyCode::NumPad9 => { offset.col = 1; offset.row = -1 },
-            KeyCode::NumPad1 => { offset.col = -1; offset.row = 1 },
-            KeyCode::NumPad3 => { offset.col = 1; offset.row = 1 },
-            _ => {}
+    let mut player_x = SCREEN_WIDTH / 2;
+    let mut player_y = SCREEN_HEIGHT / 2;
+    while !root.window_closed() {
+        root.set_default_foreground(colors::WHITE);
+        root.put_char(player_x, player_y, ' ', BackgroundFlag::None);
+        
+        let exit = handle_keys(&mut root, &mut player_x, &mut player_y);
+        if exit {
+            break
         }
 
-        match window_bounds.contains(char_pt.offset(&offset)) { 
-            Contains::DoesContain => char_pt = char_pt.offset(&offset),
-            Contains::DoesNotContain => {},
-        }
-
-        let offset = Point { row: rng.gen_range(0, 3i32) - 1, col: rng.gen_range(0, 3i32) - 1 };
-        match window_bounds.contains(dog_pt.offset(&offset)) {
-            Contains::DoesContain => dog_pt = dog_pt.offset(&offset),
-            Contains::DoesNotContain => {},
-        }
-
-        // render
-        render(&mut root, &char_pt, &dog_pt);
+        root.put_char(player_x, player_y, '@', BackgroundFlag::None);
+        root.flush();
     }
 }
