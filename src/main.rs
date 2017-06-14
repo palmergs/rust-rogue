@@ -5,10 +5,7 @@ use std::cmp;
 use rand::Rng;
 
 use tcod::console::*;
-use tcod::Color;
-use tcod::colors;
-use tcod::input::Key;
-use tcod::input::KeyCode::*;
+use tcod::colors::{ self, Color };
 use tcod::map::{ Map as FovMap, FovAlgorithm };
 
 type Map = Vec<Vec<Tile>>;
@@ -162,12 +159,12 @@ fn render_all(root: &mut Root, con: &mut Offscreen, objects: &[Object], map: &mu
                 }
             }
         }
+    }
 
-        for object in objects {
-            let visible = fov_map.is_in_fov(object.x, object.y);
-            if visible {
-                object.draw(con);
-            }
+    for object in objects {
+        let visible = fov_map.is_in_fov(object.x, object.y);
+        if visible {
+            object.draw(con);
         }
     }
 
@@ -193,6 +190,9 @@ fn player_move_or_attack(dx: i32, dy: i32, map: &Map, objects: &mut [Object]) {
 }
 
 fn handle_keys(root: &mut Root, map: &Map, objects: &mut [Object]) -> PlayerAction {
+    use tcod::input::Key;
+    use tcod::input::KeyCode::*;
+
     let key = root.wait_for_keypress(true);
     let player_alive = objects[PLAYER].alive;
     match (key, player_alive) {
