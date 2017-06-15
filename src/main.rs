@@ -274,7 +274,7 @@ fn player_move_or_attack(dx: i32, dy: i32, map: &Map, objects: &mut [Object]) {
     let y = objects[PLAYER].y + dy;
 
     let target_id = objects.iter().position(|object| {
-        object.pos() == (x, y)
+        object.fighter.is_some() && object.pos() == (x, y)
     });
 
     match target_id {
