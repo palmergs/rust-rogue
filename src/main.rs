@@ -104,6 +104,7 @@ struct Object {
     color: Color,
     fighter: Option<Fighter>,
     ai: Option<Ai>,
+    item: Option<Item>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -113,6 +114,24 @@ struct Fighter {
     defense: i32,
     power: i32,
     on_death: DeathCallback,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Item {
+    Heal,
+    Corpse,
+}
+
+fn pick_item_up(object_id: usize, objects: &mut Vec<Object>, inventory: &mut Vec<Object>, messages: &mut Messages) {
+    if inventory.len() >= 26 {
+        message(messages, 
+                format!("Your inventory is full, cannot pick up {}.", objects[object_id].name),
+                colors::RED);
+    } else {
+        let item = objects.swap_remove(object_id);
+        message(messages, format!("You picked up a {}!", item.name), colors::GREEN);
+        inventory.push(item);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -148,6 +167,7 @@ impl Object {
             alive: false,
             fighter: None,
             ai: None,
+            item: None,
         }
     }
 
@@ -216,6 +236,7 @@ fn monster_death(monster: &mut Object, messages: &mut Messages) {
     monster.fighter = None;
     monster.ai = None;
     monster.name = format!("remains of {}", monster.name);
+    monster.item = Some(Item::Corpse);
 }
 
 // Mutably borrow two *separate* elements from the given slice.
@@ -362,7 +383,8 @@ fn get_names_under_mouse(mouse: Mouse, objects: &[Object], fov_map: &FovMap) -> 
 fn handle_keys(key: Key, 
         root: &mut Root, 
         map: &Map, 
-        objects: &mut [Object], 
+        objects: &mut Vec<Object>, 
+        inventory: &mut Vec<Object>,
         messages: &mut Messages) -> PlayerAction {
 
     use tcod::input::Key;
@@ -384,6 +406,15 @@ fn handle_keys(key: Key,
         },
         (Key { code: Right, .. }, true) => {
             player_move_or_attack(1, 0, map, objects, messages);
+            PlayerAction::TookTurn
+        },
+        (Key { printable: 'g', .. }, true) => {
+            let item_id = objects.iter().position(|object| {
+                object.pos() == objects[PLAYER].pos() && object.item.is_some()
+            });
+            if let Some(item_id) = item_id {
+                pick_item_up(item_id, objects, inventory, messages);
+            }
             PlayerAction::TookTurn
         },
         (Key { code: Enter, alt: true, .. }, _) => {
@@ -461,6 +492,7 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
         let y = rand::thread_rng().gen_range(room.y1 + 1, room.y2);
         if !is_blocked(x, y, map, objects) {
             let mut object = Object::new(x, y, '!', "healing potion", colors::VIOLET, false);
+            object.item = Some(Item::Heal);
             objects.push(object);
         }
     }
@@ -549,6 +581,7 @@ fn main() {
         power: 5,
         on_death: DeathCallback::Player });
     let mut objects = vec![ player ];
+    let mut inventory = vec![];
 
     let mut map = make_map(&mut objects);
 
@@ -591,7 +624,12 @@ fn main() {
         }
         
         previous_position = objects[PLAYER].pos();
-        let player_action = handle_keys(key, &mut root, &map, &mut objects, &mut messages);
+        let player_action = handle_keys(key, 
+                &mut root, 
+                &map, 
+                &mut objects, 
+                &mut inventory,
+                &mut messages);
         if player_action == PlayerAction::Exit {
             break
         }
