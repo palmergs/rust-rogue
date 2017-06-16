@@ -2,6 +2,7 @@ extern crate tcod;
 extern crate rand;
 
 use std::cmp;
+use std::ascii::AsciiExt;
 use rand::Rng;
 
 use tcod::console::*;
@@ -18,6 +19,7 @@ const SCREEN_HEIGHT: i32 = 60;
 const BAR_WIDTH: i32 = 20;
 const PANEL_HEIGHT: i32 = 7;
 const PANEL_Y: i32 = SCREEN_HEIGHT - PANEL_HEIGHT;
+const INVENTORY_WIDTH: i32 = 50;
 
 const MSG_X: i32 = BAR_WIDTH + 2;
 const MSG_WIDTH: i32 = SCREEN_WIDTH - BAR_WIDTH - 2;
@@ -32,6 +34,7 @@ const ROOM_MIN_SIZE: i32 = 6;
 const MAX_ROOMS: i32 = 40;
 const MAX_ROOM_MONSTERS: i32 = 3;
 const MAX_ROOM_ITEMS: i32 = 3;
+const HEAL_AMOUNT: i32 = 4;
 
 const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
@@ -122,6 +125,12 @@ enum Item {
     Corpse,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum UseResult {
+    UsedUp,
+    Cancelled,
+}
+
 fn pick_item_up(object_id: usize, objects: &mut Vec<Object>, inventory: &mut Vec<Object>, messages: &mut Messages) {
     if inventory.len() >= 26 {
         message(messages, 
@@ -132,6 +141,46 @@ fn pick_item_up(object_id: usize, objects: &mut Vec<Object>, inventory: &mut Vec
         message(messages, format!("You picked up a {}!", item.name), colors::GREEN);
         inventory.push(item);
     }
+}
+
+fn use_item(inventory_id: usize, inventory: &mut Vec<Object>, objects: &mut [Object], messages: &mut Messages) {
+    if let Some(item) = inventory[inventory_id].item {
+        let on_use = match item {
+            Item::Heal => cast_heal,
+            Item::Corpse => eat_corpse,
+        };
+        match on_use(inventory_id, objects, messages) {
+            UseResult::UsedUp => {
+                inventory.remove(inventory_id);
+            }
+            UseResult::Cancelled => {
+                message(messages, "Cancelled", colors::WHITE);
+            }
+        }
+    } else {
+        message(messages, format!("The {} cannot be used.", inventory[inventory_id].name), colors::WHITE);
+    }
+}
+
+fn cast_heal(inventory_id: usize, objects: &mut [Object], messages: &mut Messages) -> UseResult {
+    if let Some(fighter) = objects[PLAYER].fighter {
+        if fighter.hp == fighter.max_hp {
+            message(messages, "You are already at full health.", colors::RED);
+            return UseResult::Cancelled;
+        }
+        message(messages, "Your wounds start to feel better!", colors::LIGHT_VIOLET);
+        objects[PLAYER].heal(HEAL_AMOUNT);
+        return UseResult::UsedUp;
+    }
+    UseResult::Cancelled
+}
+
+fn eat_corpse(inventory_id: usize, objects: &mut [Object], messages: &mut Messages) -> UseResult {
+    if let Some(fighter) = objects[PLAYER].fighter {
+        message(messages, "You start to dine then think better of it.", colors::GREEN);
+        return UseResult::Cancelled;
+    }
+    UseResult::Cancelled
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -210,6 +259,15 @@ impl Object {
         }
     }
 
+    pub fn heal(&mut self, amount: i32) {
+        if let Some(ref mut fighter) = self.fighter {
+            fighter.hp += amount;
+            if fighter.hp > fighter.max_hp {
+                fighter.hp = fighter.max_hp;
+            }
+        }
+    }
+
     pub fn attack(&mut self, target: &mut Object, messages: &mut Messages) {
         let damage = self.fighter.map_or(0, |f| f.power) - target.fighter.map_or(0, |f| f.defense);
         if damage > 0 {
@@ -269,6 +327,55 @@ fn is_blocked(x: i32, y: i32, map: &Map, objects: &[Object]) -> bool {
     })
 }
 
+fn inventory_menu(inventory: &[Object], header: &str, root: &mut Root) -> Option<usize> {
+    let options = if inventory.len() == 0 {
+        vec!["Inventory is empty.".into()]
+    } else {
+        inventory.iter().map(|item| { item.name.clone() }).collect()
+    };
+
+    let inventory_index = menu(header, &options, INVENTORY_WIDTH, root);
+    if inventory.len() > 0 {
+        inventory_index
+    } else {
+        None
+    }
+}
+
+
+fn menu<T: AsRef<str>>(header: &str, options: &[T], width: i32, root: &mut Root) -> Option<usize> {
+    assert!(options.len() <= 26, "Cannot have a menu with more than 26 options.");
+    let header_height = root.get_height_rect(0, 0, width, SCREEN_HEIGHT, header);
+    let height = options.len() as i32 + header_height;
+
+    let mut window = Offscreen::new(width, height);
+    window.set_default_foreground(colors::WHITE);
+    window.print_rect_ex(0, 0, width, height, BackgroundFlag::None, TextAlignment::Left, header);
+
+    for (index, option_text) in options.iter().enumerate() {
+        let menu_letter = (b'a' + index as u8) as char;
+        let text = format!("({}) {}", menu_letter, option_text.as_ref());
+        window.print_ex(0, header_height + index as i32, BackgroundFlag::None, TextAlignment::Left, text);
+    }
+
+    let x = SCREEN_WIDTH / 2 - width / 2;
+    let y = SCREEN_HEIGHT / 2 - height / 2;
+    tcod::console::blit(&mut window, (0, 0), (width, height), root, (x, y), 1.0, 0.7);
+
+    root.flush();
+    let key = root.wait_for_keypress(true);
+
+    if key.printable.is_alphabetic() {
+        let index = key.printable.to_ascii_lowercase() as usize - 'a' as usize;
+        if index < options.len() {
+            Some(index)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
 
 fn render_bar(panel: &mut Offscreen, x: i32, y: i32, total_width: i32, name: &str, value: i32, maximum: i32, bar_color: Color, back_color: Color) {
     let bar_width = (value as f32 / maximum as f32 * total_width as f32) as i32;
@@ -417,6 +524,13 @@ fn handle_keys(key: Key,
             }
             PlayerAction::TookTurn
         },
+        (Key { printable: 'i', .. }, true) => {
+            let inventory_index = inventory_menu(inventory, "Press the key next to an item to use it, or any other key to cancel.\n", root);
+            if let Some(inventory_index) = inventory_index {
+                use_item(inventory_index, inventory, objects, messages);
+            }
+            PlayerAction::TookTurn
+        },
         (Key { code: Enter, alt: true, .. }, _) => {
             let fullscreen = root.is_fullscreen();
             root.set_fullscreen(!fullscreen);
@@ -523,8 +637,6 @@ fn ai_take_turn(monster_id: usize, map: &Map, objects: &mut [Object], messages: 
 
 fn make_map(objects: &mut Vec<Object>) -> Map {
     let mut map = vec![vec![Tile::wall(); MAP_HEIGHT as usize]; MAP_WIDTH as usize];
-
-    let mut starting_position = (0, 0);
 
     let mut rooms = vec![];
     for _ in 0..MAX_ROOMS {
