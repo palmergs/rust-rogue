@@ -31,6 +31,7 @@ const ROOM_MAX_SIZE: i32 = 10;
 const ROOM_MIN_SIZE: i32 = 6;
 const MAX_ROOMS: i32 = 40;
 const MAX_ROOM_MONSTERS: i32 = 3;
+const MAX_ROOM_ITEMS: i32 = 3;
 
 const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
@@ -451,6 +452,16 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
             };
             monster.alive = true;
             objects.push(monster);
+        }
+    }
+
+    let num_items = rand::thread_rng().gen_range(0, MAX_ROOM_ITEMS + 1);
+    for _ in 0..num_items {
+        let x = rand::thread_rng().gen_range(room.x1 + 1, room.x2);
+        let y = rand::thread_rng().gen_range(room.y1 + 1, room.y2);
+        if !is_blocked(x, y, map, objects) {
+            let mut object = Object::new(x, y, '!', "healing potion", colors::VIOLET, false);
+            objects.push(object);
         }
     }
 }
