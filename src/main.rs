@@ -18,6 +18,10 @@ const BAR_WIDTH: i32 = 20;
 const PANEL_HEIGHT: i32 = 7;
 const PANEL_Y: i32 = SCREEN_HEIGHT - PANEL_HEIGHT;
 
+const MSG_X: i32 = BAR_WIDTH + 2;
+const MSG_WIDTH: i32 = SCREEN_WIDTH - BAR_WIDTH - 2;
+const MSG_HEIGHT: usize = PANEL_HEIGHT as usize - 1;
+
 const MAP_WIDTH: i32 = SCREEN_WIDTH;
 const MAP_HEIGHT: i32 = SCREEN_HEIGHT - PANEL_HEIGHT;
 
@@ -36,6 +40,15 @@ const COLOR_DARK_GROUND: Color = Color { r: 50, g: 50, b: 150 };
 const COLOR_LIGHT_WALL: Color = Color { r: 130, g: 110, b: 50 };
 const COLOR_LIGHT_GROUND: Color = Color { r: 200, g: 180, b: 50 };
 
+type Messages = Vec<(String, Color)>;
+
+fn messages<T, Into<String>>(messages: &mut Messages, message: T, color: Color {
+    if messages.len() == MSG_HEIGHT {
+        messages.remove(0);
+    }
+
+    messages.put((message.into(), color));
+}
 
 #[derive(Clone, Copy, Debug)]
 struct Tile {
