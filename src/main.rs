@@ -37,6 +37,8 @@ const MAX_ROOM_ITEMS: i32 = 3;
 const HEAL_AMOUNT: i32 = 4;
 const LIGHTNING_RANGE: i32 = 8;
 const LIGHTNING_DAMAGE: i32 = 6;
+const CONFUSE_RANGE: i32 = 8;
+const CONFUSE_NUM_TURNS: i32 = 8;
 
 const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
@@ -125,6 +127,7 @@ struct Fighter {
 enum Item {
     Heal,
     Lightning,
+    Confuse,
     Corpse,
 }
 
@@ -151,6 +154,7 @@ fn use_item(inventory_id: usize, inventory: &mut Vec<Object>, objects: &mut [Obj
         let on_use = match item {
             Item::Heal => cast_heal,
             Item::Lightning => cast_lightning,
+            Item::Confuse => cast_confuse,
             Item::Corpse => eat_corpse,
         };
         match on_use(inventory_id, objects, messages, _tcod) {
@@ -195,6 +199,22 @@ fn cast_lightning(_inventory_id: usize, objects: &mut [Object], messages: &mut M
     }
 }
 
+fn cast_confuse(_inventory_id: usize, objects: &mut [Object], messages: &mut Messages, tcod: &mut Tcod) -> UseResult {
+    let monster_id = closest_monster(CONFUSE_RANGE, objects, tcod);
+    if let Some(monster_id) = monster_id {
+        let old_ai = objects[monster_id].ai.take().unwrap_or(Ai::Basic);
+        objects[monster_id].ai = Some(Ai::Confused {
+            previous_ai: Box::new(old_ai),
+            num_turns: CONFUSE_NUM_TURNS,
+        });
+        message(messages, format!("The eyes of {} look vacent and he starts to stumble around!", objects[monster_id].name), colors::LIGHT_GREEN);
+        UseResult::UsedUp
+    } else {
+        message(messages, "No enemy is close enough to strike.", colors::RED);
+        UseResult::Cancelled
+    }
+}
+
 fn cast_heal(_inventory_id: usize, objects: &mut [Object], messages: &mut Messages, _tcod: &mut Tcod) -> UseResult {
     if let Some(fighter) = objects[PLAYER].fighter {
         if fighter.hp == fighter.max_hp {
@@ -216,8 +236,11 @@ fn eat_corpse(_inventory_id: usize, objects: &mut [Object], messages: &mut Messa
     UseResult::Cancelled
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Ai;
+#[derive(Clone, Debug, PartialEq)]
+enum Ai {
+    Basic,
+    Confused { previous_ai: Box<Ai>, num_turns: i32 },
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum DeathCallback {
@@ -602,7 +625,7 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
                     defense: 0, 
                     power: 3,
                     on_death: DeathCallback::Monster});
-                orc.ai = Some(Ai);
+                orc.ai = Some(Ai::Basic);
                 orc
             } else {
                 let mut troll = Object::new(x, y, 'T', "troll", colors::DARKER_GREEN, true);
@@ -612,7 +635,7 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
                     defense: 1, 
                     power: 4,
                     on_death: DeathCallback::Monster});
-                troll.ai = Some(Ai);
+                troll.ai = Some(Ai::Basic);
                 troll
             };
             monster.alive = true;
@@ -629,6 +652,10 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
             let item = if dice < 0.7 {
                 let mut object = Object::new(x, y, '!', "healing potion", colors::VIOLET, false);
                 object.item = Some(Item::Heal);
+                object
+            } else if dice < 0.7 + 0.15 {
+                let mut object = Object::new(x, y, '?', "scroll of confusion", colors::LIGHT_YELLOW, false);
+                object.item = Some(Item::Confuse);
                 object
             } else {
                 let mut object = Object::new(x, y, '?', "scroll of lightning bolt", colors::LIGHT_YELLOW, false);
@@ -651,6 +678,16 @@ fn move_towards(id: usize, target_x: i32, target_y: i32, map: &Map, objects: &mu
 }
 
 fn ai_take_turn(monster_id: usize, map: &Map, objects: &mut [Object], messages: &mut Messages, fov_map: &FovMap) {
+    if let Some(ai) = objects[monster_id].ai.take() {
+        let new_ai = match ai {
+            Ai::Basic => ai_basic(monster_id, map, objects, fov_map, messages),
+            Ai::Confused { previous_ai, num_turns } => ai_confused(monster_id, map, objects, messages, previous_ai, num_turns),
+        };
+        objects[monster_id].ai = Some(new_ai);
+    }
+}
+
+fn ai_basic(monster_id: usize, map: &Map, objects: &mut [Object], fov_map: &FovMap, messages: &mut Messages) -> Ai {
     let (monster_x, monster_y) = objects[monster_id].pos();
     if fov_map.is_in_fov(monster_x, monster_y) {
         if objects[monster_id].distance_to(&objects[PLAYER]) >= 2.0 {
@@ -660,6 +697,21 @@ fn ai_take_turn(monster_id: usize, map: &Map, objects: &mut [Object], messages: 
             let (monster, player) = mut_two(monster_id, PLAYER, objects);
             monster.attack(player, messages);
         }
+    }
+    Ai::Basic
+}
+
+fn ai_confused(monster_id: usize, map: &Map, objects: &mut [Object], messages: &mut Messages, previous_ai: Box<Ai>, num_turns: i32) -> Ai {
+    if num_turns >= 0 {
+        move_by(monster_id, 
+                rand::thread_rng().gen_range(-1, 2),
+                rand::thread_rng().gen_range(-1, 2),
+                map,
+                objects);
+        Ai::Confused { previous_ai: previous_ai, num_turns: num_turns-1 }
+    } else {
+        message(messages, format!("The {} is no longer confused!", objects[monster_id].name), colors::RED);
+        *previous_ai
     }
 }
 
