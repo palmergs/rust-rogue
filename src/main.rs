@@ -389,22 +389,14 @@ fn render_bar(panel: &mut Offscreen, x: i32, y: i32, total_width: i32, name: &st
     panel.print_ex(x + total_width / 2, y, BackgroundFlag::None, TextAlignment::Center, &format!("{}: {}/{}", name, value, maximum));
 }
 
-fn render_all(root: &mut Root, 
-        con: &mut Offscreen, 
-        panel: &mut Offscreen, 
-        mouse: Mouse,
-        objects: &[Object], 
-        map: &mut Map, 
-        messages: &Messages,
-        fov_map: &mut FovMap, 
-        fov_recompute: bool) {
+fn render_all(tcod: &mut Tcod, objects: &[Object], map: &mut Map, messages: &Messages, fov_recompute: bool) {
 
     if fov_recompute {
         let player = &objects[PLAYER];
-        fov_map.compute_fov(player.x, player.y, TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO);
+        tcod.fov.compute_fov(player.x, player.y, TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO);
         for y in 0..MAP_HEIGHT {
             for x in 0..MAP_WIDTH {
-                let visible = fov_map.is_in_fov(x, y);
+                let visible = tcod.fov.is_in_fov(x, y);
                 let wall = map[x as usize][y as usize].block_sight;
                 let color = match(visible, wall) {
                     (false, true) => COLOR_DARK_WALL,
@@ -419,42 +411,42 @@ fn render_all(root: &mut Root,
                 }
 
                 if *explored {
-                    con.set_char_background(x, y, color, BackgroundFlag::Set);
+                    tcod.con.set_char_background(x, y, color, BackgroundFlag::Set);
                 }
             }
         }
     }
 
-    let mut to_draw: Vec<_> = objects.iter().filter(|o| fov_map.is_in_fov(o.x, o.y)).collect();
+    let mut to_draw: Vec<_> = objects.iter().filter(|o| tcod.fov.is_in_fov(o.x, o.y)).collect();
     to_draw.sort_by(|o1, o2| { o1.blocks.cmp(&o2.blocks) });
     for object in &to_draw {
-        object.draw(con);
+        object.draw(&mut tcod.con);
     }
 
-    blit(con, (0, 0), (MAP_WIDTH, MAP_HEIGHT), root, (0, 0), 1.0, 1.0);
+    blit(&tcod.con, (0, 0), (MAP_WIDTH, MAP_HEIGHT), &mut tcod.root, (0, 0), 1.0, 1.0);
 
-    panel.set_default_background(colors::BLACK);
-    panel.clear();
+    tcod.panel.set_default_background(colors::BLACK);
+    tcod.panel.clear();
 
     let hp = objects[PLAYER].fighter.map_or(0, |f| f.hp);
     let max_hp = objects[PLAYER].fighter.map_or(0, |f| f.max_hp);
-    render_bar(panel, 1, 1, BAR_WIDTH, "HP", hp, max_hp, colors::LIGHT_RED, colors::DARKER_RED);
+    render_bar(&mut tcod.panel, 1, 1, BAR_WIDTH, "HP", hp, max_hp, colors::LIGHT_RED, colors::DARKER_RED);
 
-    panel.set_default_foreground(colors::LIGHT_GREY);
-    panel.print_ex(1, 0, BackgroundFlag::None, TextAlignment::Left, get_names_under_mouse(mouse, objects, fov_map));
+    tcod.panel.set_default_foreground(colors::LIGHT_GREY);
+    tcod.panel.print_ex(1, 0, BackgroundFlag::None, TextAlignment::Left, get_names_under_mouse(tcod.mouse, objects, &tcod.fov));
 
     let mut y = MSG_HEIGHT as i32;
     for &(ref msg, color) in messages.iter().rev() {
-        let msg_height = panel.get_height_rect(MSG_X, y, MSG_WIDTH, 0, msg);
+        let msg_height = tcod.panel.get_height_rect(MSG_X, y, MSG_WIDTH, 0, msg);
         y -= msg_height;
         if y < 0 {
             break;
         }
-        panel.set_default_foreground(color);
-        panel.print_rect(MSG_X, y, MSG_WIDTH, 0, msg);
+        tcod.panel.set_default_foreground(color);
+        tcod.panel.print_rect(MSG_X, y, MSG_WIDTH, 0, msg);
     }
 
-    blit(panel, (0, 0), (SCREEN_WIDTH, PANEL_HEIGHT), root, (0, PANEL_Y), 1.0, 1.0);
+    blit(&tcod.panel, (0, 0), (SCREEN_WIDTH, PANEL_HEIGHT), &mut tcod.root, (0, PANEL_Y), 1.0, 1.0);
 }
 
 fn player_move_or_attack(dx: i32, dy: i32, map: &Map, objects: &mut [Object], messages: &mut Messages) {
@@ -487,12 +479,7 @@ fn get_names_under_mouse(mouse: Mouse, objects: &[Object], fov_map: &FovMap) -> 
     names.join(", ")
 }
 
-fn handle_keys(key: Key, 
-        root: &mut Root, 
-        map: &Map, 
-        objects: &mut Vec<Object>, 
-        inventory: &mut Vec<Object>,
-        messages: &mut Messages) -> PlayerAction {
+fn handle_keys(key: Key, tcod: &mut Tcod, map: &Map, objects: &mut Vec<Object>, inventory: &mut Vec<Object>, messages: &mut Messages) -> PlayerAction {
 
     use tcod::input::Key;
     use tcod::input::KeyCode::*;
@@ -525,15 +512,15 @@ fn handle_keys(key: Key,
             PlayerAction::TookTurn
         },
         (Key { printable: 'i', .. }, true) => {
-            let inventory_index = inventory_menu(inventory, "Press the key next to an item to use it, or any other key to cancel.\n", root);
+            let inventory_index = inventory_menu(inventory, "Press the key next to an item to use it, or any other key to cancel.\n", &mut tcod.root);
             if let Some(inventory_index) = inventory_index {
                 use_item(inventory_index, inventory, objects, messages);
             }
             PlayerAction::TookTurn
         },
         (Key { code: Enter, alt: true, .. }, _) => {
-            let fullscreen = root.is_fullscreen();
-            root.set_fullscreen(!fullscreen);
+            let fullscreen = tcod.root.is_fullscreen();
+            tcod.root.set_fullscreen(!fullscreen);
             PlayerAction::DidntTakeTurn
         },
         (Key { code: Escape, .. }, _) => return PlayerAction::Exit,
@@ -669,15 +656,27 @@ fn make_map(objects: &mut Vec<Object>) -> Map {
     map
 }
 
+struct Tcod {
+    root: Root,
+    con: Offscreen,
+    panel: Offscreen,
+    fov: FovMap,
+    mouse: Mouse
+}
+
 fn main() {
-    let mut root = Root::initializer()
+    let mut tcod = Tcod {
+        root: Root::initializer()
             .font("arial10x10.png", FontLayout::Tcod)
             .font_type(FontType::Greyscale)
             .size(SCREEN_WIDTH, SCREEN_HEIGHT)
             .title("Tutorial")
-            .init();
-    let mut con = Offscreen::new(SCREEN_WIDTH, SCREEN_HEIGHT);
-    let mut panel = Offscreen::new(SCREEN_WIDTH, PANEL_HEIGHT);
+            .init(),
+        con: Offscreen::new(MAP_WIDTH, MAP_HEIGHT),
+        panel: Offscreen::new(SCREEN_WIDTH, PANEL_HEIGHT),
+        fov: FovMap::new(MAP_WIDTH, MAP_HEIGHT),
+        mouse: Default::default(),
+    };
 
     tcod::system::set_fps(LIMIT_FPS);
 
@@ -697,47 +696,35 @@ fn main() {
 
     let mut map = make_map(&mut objects);
 
-    let mut fov_map = FovMap::new(MAP_WIDTH, MAP_HEIGHT);
-
     for y in 0..MAP_HEIGHT {
         for x in 0..MAP_WIDTH {
-            fov_map.set(x, y, 
+            tcod.fov.set(x, y, 
                     !map[x as usize][y as usize].block_sight,
                     !map[x as usize][y as usize].blocked);
         }
     }
 
-    let mut mouse = Default::default();
     let mut key = Default::default();
-
     let mut previous_position = (-1, -1);
-    while !root.window_closed() {
+    while !tcod.root.window_closed() {
         let fov_recompute = previous_position != (objects[PLAYER].pos());
 
         match input::check_for_event(input::MOUSE | input::KEY_PRESS) {
-            Some((_, Event::Mouse(m))) => mouse = m,
+            Some((_, Event::Mouse(m))) => tcod.mouse = m,
             Some((_, Event::Key(k))) => key = k,
             _ => key = Default::default(),
         }
 
-        render_all(&mut root, 
-                &mut con, 
-                &mut panel, 
-                mouse,
-                &objects, 
-                &mut map, 
-                &messages, 
-                &mut fov_map, 
-                fov_recompute);
-        root.flush();
+        render_all(&mut tcod, &objects, &mut map, &messages, fov_recompute);
+        tcod.root.flush();
 
         for object in &objects {
-            object.clear(&mut con)
+            object.clear(&mut tcod.con)
         }
         
         previous_position = objects[PLAYER].pos();
         let player_action = handle_keys(key, 
-                &mut root, 
+                &mut tcod, 
                 &map, 
                 &mut objects, 
                 &mut inventory,
@@ -749,7 +736,7 @@ fn main() {
         if objects[PLAYER].alive && player_action != PlayerAction::DidntTakeTurn {
             for id in 0..objects.len() {
                 if objects[id].ai.is_some() {
-                    ai_take_turn(id, &map, &mut objects, &mut messages, &fov_map);
+                    ai_take_turn(id, &map, &mut objects, &mut messages, &tcod.fov);
                 }
             }
         }
