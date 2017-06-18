@@ -1,9 +1,14 @@
 extern crate tcod;
 extern crate rand;
+extern crate rustc_serialize;
 
 use std::cmp;
+use std::io::{ Read, Write };
+use std::fs::File;
+use std::error::Error;
 use std::ascii::AsciiExt;
 use rand::Rng;
+use rustc_serialize::json;
 
 use tcod::console::*;
 use tcod::colors::{ self, Color };
@@ -13,8 +18,8 @@ use tcod::input::{ self, Key, Event, Mouse };
 type Map = Vec<Vec<Tile>>;
 
 const LIMIT_FPS: i32 = 20;
-const SCREEN_WIDTH: i32 = 90;
-const SCREEN_HEIGHT: i32 = 60;
+const SCREEN_WIDTH: i32 = 80;
+const SCREEN_HEIGHT: i32 = 50;
 
 const BAR_WIDTH: i32 = 20;
 const PANEL_HEIGHT: i32 = 7;
@@ -61,7 +66,7 @@ impl MessageLog for Vec<(String, Color)> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, RustcEncodable, RustcDecodable)]
 struct Tile {
     blocked: bool,
     block_sight: bool,
@@ -103,6 +108,7 @@ impl Rect {
     }
 }
 
+#[derive(Debug, RustcEncodable, RustcDecodable)]
 struct Object {
     x: i32,
     y: i32,
@@ -116,7 +122,7 @@ struct Object {
     item: Option<Item>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, RustcEncodable, RustcDecodable)]
 struct Fighter {
     max_hp: i32,
     hp: i32,
@@ -125,7 +131,7 @@ struct Fighter {
     on_death: DeathCallback,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, RustcEncodable, RustcDecodable)]
 enum Item {
     Heal,
     Lightning,
@@ -264,13 +270,13 @@ fn eat_corpse(_inventory_id: usize, objects: &mut [Object], game: &mut Game, _tc
     UseResult::Cancelled
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, RustcEncodable, RustcDecodable)]
 enum Ai {
     Basic,
     Confused { previous_ai: Box<Ai>, num_turns: i32 },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, RustcEncodable, RustcDecodable)]
 enum DeathCallback {
     Player,
     Monster,
@@ -285,8 +291,6 @@ impl DeathCallback {
         callback(object, messages);
     }
 }
-
-
 
 impl Object {
     pub fn new(x: i32, y: i32, char: char, name: &str, color: Color, blocks: bool) -> Self {
@@ -845,6 +849,7 @@ struct Tcod {
     mouse: Mouse
 }
 
+#[derive(Debug, RustcEncodable, RustcDecodable)]
 struct Game {
     map: Map,
     log: Messages,
@@ -909,6 +914,7 @@ fn play_game(objects: &mut Vec<Object>, game: &mut Game, tcod: &mut Tcod) {
         previous_player_position = objects[PLAYER].pos();
         let player_action = handle_keys(key, tcod, game, objects);
         if player_action == PlayerAction::Exit {
+            save_game(objects, game);
             break
         }
 
@@ -922,6 +928,21 @@ fn play_game(objects: &mut Vec<Object>, game: &mut Game, tcod: &mut Tcod) {
     }
 }
 
+fn save_game(objects: &[Object], game: &Game) -> Result<(), Box<Error>> {
+    let save_data = try! { json::encode(&(objects, game)) };
+    let mut file = try! { File::create("savegame") };
+    try! { file.write_all(save_data.as_bytes()) }
+    Ok(())
+}
+
+fn load_game() -> Result<(Vec<Object>, Game), Box<Error>> {
+    let mut json_save_state = String::new();
+    let mut file = try! { File::open("savegame") };
+    try! { file.read_to_string(&mut json_save_state) };
+    let result = try! { json::decode::<(Vec<Object>, Game)>(&json_save_state) };
+    Ok(result)
+}
+
 fn main_menu(tcod: &mut Tcod) {
     let img = tcod::image::Image::from_file("menu_background.png").ok().expect("Background image not found");
     while !tcod.root.window_closed() {
@@ -931,6 +952,11 @@ fn main_menu(tcod: &mut Tcod) {
         match choice {
             Some(0) => {
                 let (mut objects, mut game) = new_game(tcod);
+                play_game(&mut objects, &mut game, tcod);
+            },
+            Some(1) => {
+                let (mut objects, mut game) = load_game().unwrap();
+                initialize_fov(&game.map, tcod);
                 play_game(&mut objects, &mut game, tcod);
             },
             Some(2) => {
