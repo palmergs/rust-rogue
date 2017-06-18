@@ -140,6 +140,14 @@ enum UseResult {
     Cancelled,
 }
 
+fn drop_item(inventory_id: usize, inventory: &mut Vec<Object>, objects: &mut Vec<Object>, messages: &mut Messages) {
+    let mut item = inventory.remove(inventory_id);
+    item.set_pos(objects[PLAYER].x, objects[PLAYER].y);
+    message(messages, format!("You dropped a {}.", item.name), colors::YELLOW);
+    objects.push(item);
+}
+
+
 fn pick_item_up(object_id: usize, objects: &mut Vec<Object>, inventory: &mut Vec<Object>, messages: &mut Messages) {
     if inventory.len() >= 26 {
         message(messages, 
@@ -206,8 +214,8 @@ fn cast_fireball(_inventory_id: usize, objects: &mut [Object], messages: &mut Me
     UseResult::UsedUp
 }
 
-fn cast_lightning(_inventory_id: usize, objects: &mut [Object], messages: &mut Messages, map: &mut Map, _tcod: &mut Tcod) -> UseResult {
-    let monster_id = target_monster(_tcod, objects, map, messages, Some(LIGHTNING_RANGE as f32));
+fn cast_lightning(_inventory_id: usize, objects: &mut [Object], messages: &mut Messages, _map: &mut Map, tcod: &mut Tcod) -> UseResult {
+    let monster_id = closest_monster(LIGHTNING_RANGE, objects, tcod);
     if let Some(monster_id) = monster_id {
         message(messages,
                 format!("A lightning bold strikes the {} with a loud thunder! The damage is {} hit points.", objects[monster_id].name, LIGHTNING_DAMAGE), 
@@ -221,6 +229,7 @@ fn cast_lightning(_inventory_id: usize, objects: &mut [Object], messages: &mut M
 }
 
 fn cast_confuse(_inventory_id: usize, objects: &mut [Object], messages: &mut Messages, _map: &mut Map, tcod: &mut Tcod) -> UseResult {
+    message(messages, "Left-click an enemy to confuse it, or right-click to cancel.", colors::LIGHT_CYAN);
     let monster_id = target_monster(tcod, objects, _map, messages, Some(CONFUSE_RANGE as f32));
     if let Some(monster_id) = monster_id {
         let old_ai = objects[monster_id].ai.take().unwrap_or(Ai::Basic);
@@ -630,6 +639,13 @@ fn handle_keys(key: Key, tcod: &mut Tcod, map: &mut Map, objects: &mut Vec<Objec
             });
             if let Some(item_id) = item_id {
                 pick_item_up(item_id, objects, inventory, messages);
+            }
+            PlayerAction::TookTurn
+        },
+        (Key { printable: 'd', .. }, true) => {
+            let inventory_index = inventory_menu(inventory, "Press the key next to an item to drop it, or any other to cancel.\n", &mut tcod.root);
+            if let Some(inventory_index) = inventory_index {
+                drop_item(inventory_index, inventory, objects, messages);
             }
             PlayerAction::TookTurn
         },
