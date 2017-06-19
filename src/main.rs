@@ -46,6 +46,9 @@ const FIREBALL_RADIUS: i32 = 3;
 const FIREBALL_DAMAGE: i32 = 10;
 const CONFUSE_RANGE: i32 = 8;
 const CONFUSE_NUM_TURNS: i32 = 8;
+const LEVEL_UP_BASE: i32 = 200;
+const LEVEL_UP_FACTOR: i32 = 150;
+const LEVEL_SCREEN_WIDTH: i32 = 40;
 
 const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
@@ -113,6 +116,7 @@ struct Object {
     x: i32,
     y: i32,
     name: String,
+    level: i32,
     blocks: bool,
     always_visible: bool,
     alive: bool,
@@ -127,6 +131,7 @@ struct Object {
 struct Fighter {
     max_hp: i32,
     hp: i32,
+    xp: i32,
     defense: i32,
     power: i32,
     on_death: DeathCallback,
@@ -223,12 +228,18 @@ fn cast_fireball(_inventory_id: usize, objects: &mut [Object], game: &mut Game, 
         None => return UseResult::Cancelled,
     };
     game.log.add(format!("The fireball explodes, burning everything within {} tiles!", FIREBALL_RADIUS), colors::ORANGE);
-    for obj in objects {
+    let mut xp_to_gain = 0;
+    for (id, obj) in objects.iter_mut().enumerate() {
         if obj.distance(x, y) <= FIREBALL_RADIUS as f32 && obj.fighter.is_some() {
             game.log.add(format!("The {} gets burned for {} hit points.", obj.name, FIREBALL_DAMAGE), colors::ORANGE);
-            obj.take_damage(FIREBALL_DAMAGE, &mut game.log);
+            if let Some(xp) = obj.take_damage(FIREBALL_DAMAGE, &mut game.log) {
+                if id != PLAYER {
+                    xp_to_gain += xp
+                }
+            }
         }
     }
+    objects[PLAYER].fighter.as_mut().unwrap().xp += xp_to_gain;
 
     UseResult::UsedUp
 }
@@ -239,7 +250,9 @@ fn cast_lightning(_inventory_id: usize, objects: &mut [Object], game: &mut Game,
         game.log.add(
                 format!("A lightning bold strikes the {} with a loud thunder! The damage is {} hit points.", objects[monster_id].name, LIGHTNING_DAMAGE), 
                 colors::LIGHT_BLUE);
-        objects[monster_id].take_damage(LIGHTNING_DAMAGE, &mut game.log);
+        if let Some(xp) = objects[monster_id].take_damage(LIGHTNING_DAMAGE, &mut game.log) {
+            objects[PLAYER].fighter.as_mut().unwrap().xp += xp;
+        }
         UseResult::UsedUp
     } else {
         game.log.add("No enemy is close enough to strike.", colors::RED);
@@ -312,6 +325,7 @@ impl Object {
         Object {
             x: x,
             y: y,
+            level: 1,
             char: char,
             color: color,
             name: name.into(),
@@ -350,7 +364,7 @@ impl Object {
         (((x - self.x).pow(2) + (y - self.y).pow(2)) as f32).sqrt()
     }
 
-    pub fn take_damage(&mut self, damage: i32, messages: &mut Messages) {
+    pub fn take_damage(&mut self, damage: i32, messages: &mut Messages) -> Option<i32> {
         if let Some(fighter) = self.fighter.as_mut() {
             if damage > 0 {
                 fighter.hp -= damage;
@@ -361,8 +375,10 @@ impl Object {
             if fighter.hp <= 0 {
                 self.alive = false;
                 fighter.on_death.callback(self, messages);
+                return Some(fighter.xp);
             }
         }
+        None
     }
 
     pub fn heal(&mut self, amount: i32) {
@@ -378,9 +394,44 @@ impl Object {
         let damage = self.fighter.map_or(0, |f| f.power) - target.fighter.map_or(0, |f| f.defense);
         if damage > 0 {
             messages.add(format!("{} attacks {} for {} hit points.", self.name, target.name, damage), colors::WHITE);
-            target.take_damage(damage, messages);
+            if let Some(xp) = target.take_damage(damage, messages) {
+                self.fighter.as_mut().unwrap().xp += xp;
+            }
         } else {
             messages.add(format!("{} attacks {} but it has no effect!", self.name, target.name), colors::GREY);
+        }
+    }
+}
+
+fn level_up(objects: &mut [Object], game: &mut Game, tcod: &mut Tcod) {
+    let player = &mut objects[PLAYER];
+    let level_up_xp = LEVEL_UP_BASE + player.level * LEVEL_UP_FACTOR;
+    if player.fighter.as_ref().map_or(0, |f| f.xp) >= level_up_xp {
+        player.level += 1;
+        game.log.add(format!("You battle skills grow stronger! You reached level {}.", player.level), colors::YELLOW);
+        let fighter = player.fighter.as_mut().unwrap();
+        let mut choice = None;
+        while choice.is_none() {
+            choice = menu(
+                    "Level up! Choose a stat to raise:\n",
+                    &[format!("Constitution (+20 HP, from {})", fighter.max_hp),
+                      format!("Strength (+1 attack, from {})", fighter.power),
+                      format!("Agility (+1 defense, from {})", fighter.defense)],
+                    LEVEL_SCREEN_WIDTH, &mut tcod.root);
+        };
+        fighter.xp -= level_up_xp;
+        match choice.unwrap() {
+            0 => {
+                fighter.max_hp += 20;
+                fighter.hp += 20;
+            },
+            1 => { 
+                fighter.power += 1;
+            },
+            2 => {
+                fighter.defense += 1;
+            },
+            _ => unreachable!(),
         }
     }
 }
@@ -739,6 +790,7 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
                 orc.fighter = Some(Fighter { 
                     max_hp: 10, 
                     hp: 10, 
+                    xp: 35,
                     defense: 0, 
                     power: 3,
                     on_death: DeathCallback::Monster});
@@ -749,6 +801,7 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
                 troll.fighter = Some(Fighter { 
                     max_hp: 16, 
                     hp: 16, 
+                    xp: 100,
                     defense: 1, 
                     power: 4,
                     on_death: DeathCallback::Monster});
@@ -896,6 +949,7 @@ fn new_game(tcod: &mut Tcod) -> (Vec<Object>, Game) {
     player.fighter = Some(Fighter { 
         max_hp: 30, 
         hp: 30,
+        xp: 0,
         defense: 2, 
         power: 5,
         on_death: DeathCallback::Player });
@@ -941,6 +995,7 @@ fn play_game(objects: &mut Vec<Object>, game: &mut Game, tcod: &mut Tcod) {
 
 
         tcod.root.flush();
+        level_up(objects, game, tcod);
 
         for object in objects.iter_mut() {
             object.clear(&mut tcod.con)
