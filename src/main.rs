@@ -49,6 +49,7 @@ const CONFUSE_NUM_TURNS: i32 = 8;
 const LEVEL_UP_BASE: i32 = 200;
 const LEVEL_UP_FACTOR: i32 = 150;
 const LEVEL_SCREEN_WIDTH: i32 = 40;
+const CHARACTER_SCREEN_WIDTH: i32 = 30;
 
 const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
@@ -710,7 +711,26 @@ fn handle_keys(key: Key, tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Obj
             player_move_or_attack(1, 0, game, objects);
             PlayerAction::TookTurn
         },
-        (Key { printable: '<', .. }, true) => {
+        (Key { code: Home, .. }, true) | (Key { code: NumPad7, .. }, true) => {
+            player_move_or_attack(-1, -1, game, objects);
+            PlayerAction::TookTurn
+        },
+        (Key { code: PageUp, .. }, true) | (Key { code: NumPad9, .. }, true) => {
+            player_move_or_attack(1, -1, game, objects);
+            PlayerAction::TookTurn
+        },
+        (Key { code: End, .. }, true) | (Key { code: NumPad1, .. }, true) => {
+            player_move_or_attack(-1, 1, game, objects);
+            PlayerAction::TookTurn
+        },
+        (Key { code: PageDown, .. }, true) | (Key { code: NumPad3, .. }, true) => {
+            player_move_or_attack(1, 1, game, objects);
+            PlayerAction::TookTurn
+        },
+        (Key { code: NumPad5, .. }, true) => {
+            PlayerAction::TookTurn
+        },
+        (Key { printable: '>', .. }, true) => {
             let player_on_stairs = objects.iter().any(|object| {
                 object.pos() == objects[PLAYER].pos() && object.name == "stairs"
             });
@@ -741,6 +761,24 @@ fn handle_keys(key: Key, tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Obj
                 use_item(inventory_index, game, objects, tcod);
             }
             PlayerAction::TookTurn
+        },
+        (Key { printable: 'c', .. }, true) => {
+            let player = &objects[PLAYER];
+            let level = player.level;
+            let level_up_xp = LEVEL_UP_BASE + player.level * LEVEL_UP_FACTOR;
+            if let Some(fighter) = player.fighter.as_ref() {
+                let msg = format!("Character information
+
+Level: {}
+Experience: {}
+Experience to level up: {}
+
+Maximum HP: {}
+Attack: {}
+Defense: {}", level, fighter.xp, level_up_xp, fighter.max_hp, fighter.power, fighter.defense);
+                msgbox(&msg, CHARACTER_SCREEN_WIDTH, &mut tcod.root);
+            }
+            PlayerAction::DidntTakeTurn
         },
         (Key { code: Enter, alt: true, .. }, _) => {
             let fullscreen = tcod.root.is_fullscreen();
@@ -921,7 +959,7 @@ fn make_map(objects: &mut Vec<Object>) -> Map {
     }
 
     let (last_room_x, last_room_y) = rooms[rooms.len() - 1].center();
-    let stairs = Object::new(last_room_x, last_room_y, '<', "stairs", colors::WHITE, false);
+    let stairs = Object::new(last_room_x, last_room_y, '>', "stairs", colors::WHITE, false);
     objects.push(stairs);
 
     map
