@@ -114,6 +114,7 @@ struct Object {
     y: i32,
     name: String,
     blocks: bool,
+    always_visible: bool,
     alive: bool,
     char: char,
     color: Color,
@@ -144,6 +145,20 @@ enum Item {
 enum UseResult {
     UsedUp,
     Cancelled,
+}
+
+
+fn next_level(tcod: &mut Tcod, objects: &mut Vec<Object>, game: &mut Game) {
+    game.log.add("You take a moment to rest and recover your strength.", colors::VIOLET);
+    let heal_hp = objects[PLAYER].fighter.map_or(0, |f| f.max_hp / 2);
+    objects[PLAYER].heal(heal_hp);
+
+    game.log.add("After a rare moment of peace, you descend deeper into the heart of the dungeon...", colors::RED);
+
+    objects.truncate(1);
+    game.dungeon_level += 1;
+    game.map = make_map(objects);
+    initialize_fov(&game.map, tcod);
 }
 
 fn drop_item(inventory_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
@@ -301,6 +316,7 @@ impl Object {
             color: color,
             name: name.into(),
             blocks: blocks,
+            always_visible: false,
             alive: false,
             fighter: None,
             ai: None,
@@ -511,7 +527,10 @@ fn render_all(tcod: &mut Tcod, objects: &[Object], game: &mut Game, fov_recomput
         }
     }
 
-    let mut to_draw: Vec<_> = objects.iter().filter(|o| tcod.fov.is_in_fov(o.x, o.y)).collect();
+    let mut to_draw: Vec<_> = objects.iter().filter(|o| {
+        tcod.fov.is_in_fov(o.x, o.y) || 
+        (o.always_visible && game.map[o.x as usize][o.y as usize].explored)
+    }).collect();
     to_draw.sort_by(|o1, o2| { o1.blocks.cmp(&o2.blocks) });
     for object in &to_draw {
         object.draw(&mut tcod.con);
@@ -525,6 +544,7 @@ fn render_all(tcod: &mut Tcod, objects: &[Object], game: &mut Game, fov_recomput
     let hp = objects[PLAYER].fighter.map_or(0, |f| f.hp);
     let max_hp = objects[PLAYER].fighter.map_or(0, |f| f.max_hp);
     render_bar(&mut tcod.panel, 1, 1, BAR_WIDTH, "HP", hp, max_hp, colors::LIGHT_RED, colors::DARKER_RED);
+    tcod.panel.print_ex(1, 3, BackgroundFlag::None, TextAlignment::Left, format!("Dungeon level: {}", game.dungeon_level));
 
     tcod.panel.set_default_foreground(colors::LIGHT_GREY);
     tcod.panel.print_ex(1, 0, BackgroundFlag::None, TextAlignment::Left, get_names_under_mouse(tcod.mouse, objects, &tcod.fov));
@@ -638,6 +658,15 @@ fn handle_keys(key: Key, tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Obj
         (Key { code: Right, .. }, true) => {
             player_move_or_attack(1, 0, game, objects);
             PlayerAction::TookTurn
+        },
+        (Key { printable: '<', .. }, true) => {
+            let player_on_stairs = objects.iter().any(|object| {
+                object.pos() == objects[PLAYER].pos() && object.name == "stairs"
+            });
+            if player_on_stairs {
+                next_level(tcod, objects, game);
+            }
+            PlayerAction::DidntTakeTurn
         },
         (Key { printable: 'g', .. }, true) => {
             let item_id = objects.iter().position(|object| {
@@ -838,6 +867,10 @@ fn make_map(objects: &mut Vec<Object>) -> Map {
         }
     }
 
+    let (last_room_x, last_room_y) = rooms[rooms.len() - 1].center();
+    let stairs = Object::new(last_room_x, last_room_y, '<', "stairs", colors::WHITE, false);
+    objects.push(stairs);
+
     map
 }
 
@@ -854,6 +887,7 @@ struct Game {
     map: Map,
     log: Messages,
     inventory: Vec<Object>,
+    dungeon_level: u32,
 }
 
 fn new_game(tcod: &mut Tcod) -> (Vec<Object>, Game) {
@@ -870,6 +904,7 @@ fn new_game(tcod: &mut Tcod) -> (Vec<Object>, Game) {
         map: make_map(&mut objects),
         log: vec![],
         inventory: vec![],
+        dungeon_level: 1,
     };
 
     initialize_fov(&game.map, tcod);
