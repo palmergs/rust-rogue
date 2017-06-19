@@ -914,7 +914,7 @@ fn play_game(objects: &mut Vec<Object>, game: &mut Game, tcod: &mut Tcod) {
         previous_player_position = objects[PLAYER].pos();
         let player_action = handle_keys(key, tcod, game, objects);
         if player_action == PlayerAction::Exit {
-            save_game(objects, game);
+            save_game(objects, game).unwrap();
             break
         }
 
@@ -931,7 +931,7 @@ fn play_game(objects: &mut Vec<Object>, game: &mut Game, tcod: &mut Tcod) {
 fn save_game(objects: &[Object], game: &Game) -> Result<(), Box<Error>> {
     let save_data = try! { json::encode(&(objects, game)) };
     let mut file = try! { File::create("savegame") };
-    try! { file.write_all(save_data.as_bytes()) }
+    try! { file.write_all(save_data.as_bytes()) };
     Ok(())
 }
 
@@ -941,6 +941,11 @@ fn load_game() -> Result<(Vec<Object>, Game), Box<Error>> {
     try! { file.read_to_string(&mut json_save_state) };
     let result = try! { json::decode::<(Vec<Object>, Game)>(&json_save_state) };
     Ok(result)
+}
+
+fn msgbox(text: &str, width: i32, root: &mut Root) {
+    let options: &[&str] = &[];
+    menu(text, options, width, root);
 }
 
 fn main_menu(tcod: &mut Tcod) {
@@ -955,9 +960,16 @@ fn main_menu(tcod: &mut Tcod) {
                 play_game(&mut objects, &mut game, tcod);
             },
             Some(1) => {
-                let (mut objects, mut game) = load_game().unwrap();
-                initialize_fov(&game.map, tcod);
-                play_game(&mut objects, &mut game, tcod);
+                match load_game() {
+                    Ok((mut objects, mut game)) => {
+                        initialize_fov(&game.map, tcod);
+                        play_game(&mut objects, &mut game, tcod);
+                    },
+                    Err(_e) => {
+                        msgbox("\nNo saved game to load.\n", 24, &mut tcod.root);
+                        continue;
+                    }
+                }
             },
             Some(2) => {
                 break;
