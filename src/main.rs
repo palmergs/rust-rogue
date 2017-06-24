@@ -858,28 +858,41 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
         }
     }
 
+    let item_chances = &mut [
+        Weighted { weight: 70, item: Item::Heal },
+        Weighted { weight: 12, item: Item::Lightning },
+        Weighted { weight: 10, item: Item::Confuse },
+        Weighted { weight: 8, item: Item::Fireball },
+    ];
+    let item_choice = WeightedChoice::new(item_chances);
+
     let num_items = rand::thread_rng().gen_range(0, MAX_ROOM_ITEMS + 1);
     for _ in 0..num_items {
         let x = rand::thread_rng().gen_range(room.x1 + 1, room.x2);
         let y = rand::thread_rng().gen_range(room.y1 + 1, room.y2);
         if !is_blocked(x, y, map, objects) {
-            let dice = rand::random::<f32>();
-            let item = if dice < 0.7 {
-                let mut object = Object::new(x, y, '!', "healing potion", colors::VIOLET, false);
-                object.item = Some(Item::Heal);
-                object
-            } else if dice < 0.7 + 0.15 {
-                let mut object = Object::new(x, y, '?', "scroll of confusion", colors::LIGHT_YELLOW, false);
-                object.item = Some(Item::Confuse);
-                object
-            } else if dice < 0.7 + 0.15 + 0.10 {
-                let mut object = Object::new(x, y, '?', "scroll of lightning bolt", colors::LIGHT_YELLOW, false);
-                object.item = Some(Item::Lightning);
-                object
-            } else {
-                let mut object = Object::new(x, y, '?', "scroll of fireball", colors::LIGHT_YELLOW, false);
-                object.item = Some(Item::Fireball);
-                object
+            let item = match item_choice.ind_sample(&mut rand::thread_rng()) {
+                Item::Heal => {
+                    let mut object = Object::new(x, y, '!', "healing potion", colors::VIOLET, false);
+                    object.item = Some(Item::Heal);
+                    object
+                },
+                Item::Lightning => {
+                    let mut object = Object::new(x, y, '?', "scroll of lightning bolt", colors::LIGHT_YELLOW, false);
+                    object.item = Some(Item::Lightning);
+                    object
+                },
+                Item::Confuse => {
+                    let mut object = Object::new(x, y, '?', "scroll of confusion", colors::LIGHT_YELLOW, false);
+                    object.item = Some(Item::Confuse);
+                    object
+                },
+                Item::Fireball => {
+                    let mut object = Object::new(x, y, '?', "scroll of fireball", colors::LIGHT_YELLOW, false);
+                    object.item = Some(Item::Fireball);
+                    object
+                },
+                _ => unreachable!(),
             };
             objects.push(item);
         }
