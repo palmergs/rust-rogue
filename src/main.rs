@@ -38,13 +38,11 @@ const PLAYER: usize = 0;
 const ROOM_MAX_SIZE: i32 = 10;
 const ROOM_MIN_SIZE: i32 = 6;
 const MAX_ROOMS: i32 = 40;
-const MAX_ROOM_MONSTERS: i32 = 3;
-const MAX_ROOM_ITEMS: i32 = 3;
-const HEAL_AMOUNT: i32 = 4;
+const HEAL_AMOUNT: i32 = 30;
 const LIGHTNING_RANGE: i32 = 8;
-const LIGHTNING_DAMAGE: i32 = 12;
+const LIGHTNING_DAMAGE: i32 = 40;
 const FIREBALL_RADIUS: i32 = 3;
-const FIREBALL_DAMAGE: i32 = 10;
+const FIREBALL_DAMAGE: i32 = 25;
 const CONFUSE_RANGE: i32 = 8;
 const CONFUSE_NUM_TURNS: i32 = 8;
 const LEVEL_UP_BASE: i32 = 200;
@@ -154,6 +152,15 @@ enum UseResult {
     Cancelled,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Transition {
+    level: u32,
+    value: u32,
+}
+
+fn from_dungeon_level(table: &[Transition], level: u32) -> u32 {
+    table.iter().rev().find(|transition| level >= transition.level).map_or(0, |transision| transision.value)
+}
 
 fn next_level(tcod: &mut Tcod, objects: &mut Vec<Object>, game: &mut Game) {
     game.log.add("You take a moment to rest and recover your strength.", colors::VIOLET);
@@ -164,7 +171,7 @@ fn next_level(tcod: &mut Tcod, objects: &mut Vec<Object>, game: &mut Game) {
 
     objects.truncate(1);
     game.dungeon_level += 1;
-    game.map = make_map(objects);
+    game.map = make_map(game.dungeon_level, objects);
     initialize_fov(&game.map, tcod);
 }
 
@@ -818,16 +825,34 @@ fn create_v_tunnel(y1: i32, y2: i32, x: i32, map: &mut Map) {
     }
 }
 
-fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
+fn place_objects(level: u32, room: Rect, map: &Map, objects: &mut Vec<Object>) {
+
+    let max_monsters = from_dungeon_level(&[
+        Transition { level: 1, value: 2 },
+        Transition { level: 3, value: 3 },
+        Transition { level: 5, value: 5 },
+    ], level);
+
+    let num_monsters = rand::thread_rng().gen_range(0, max_monsters + 1);
+
+    let troll_chance = from_dungeon_level(&[
+        Transition { level: 3, value: 15 },
+        Transition { level: 4, value: 100 },
+        Transition { level: 5, value: 25 },
+    ], level);
+    
+    let ogre_chance = from_dungeon_level(&[
+        Transition { level: 4, value: 10 },
+        Transition { level: 5, value: 100 },
+    ], level);
 
     let monster_chances = &mut [
         Weighted { weight: 80, item: "orc" },
-        Weighted { weight: 20, item: "troll" },
-        Weighted { weight: 10, item: "ogre" },
+        Weighted { weight: troll_chance, item: "troll" },
+        Weighted { weight: ogre_chance, item: "ogre" },
     ];
     let monster_choice = WeightedChoice::new(monster_chances);
 
-    let num_monsters = rand::thread_rng().gen_range(0, MAX_ROOM_MONSTERS + 1);
     for _ in 0..num_monsters {
         let x = rand::thread_rng().gen_range(room.x1 + 1, room.x2);
         let y = rand::thread_rng().gen_range(room.y1 + 1, room.y2);
@@ -835,19 +860,19 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
             let mut monster = match monster_choice.ind_sample(&mut rand::thread_rng()) {
                 "orc" => {
                     let mut orc = Object::new(x, y, 'o', "orc", colors::DESATURATED_GREEN, true);
-                    orc.fighter = Some(Fighter { max_hp: 10, hp: 10, xp: 35, defense: 0, power: 3, on_death: DeathCallback::Monster });
+                    orc.fighter = Some(Fighter { max_hp: 20, hp: 20, xp: 35, defense: 0, power: 4, on_death: DeathCallback::Monster });
                     orc.ai = Some(Ai::Basic);
                     orc
                 },
                 "troll" => {
                     let mut troll = Object::new(x, y, 'T', "troll", colors::DARKER_GREEN, true);
-                    troll.fighter = Some(Fighter { max_hp: 16, hp: 16, xp: 100, defense: 1, power: 4, on_death: DeathCallback::Monster });
+                    troll.fighter = Some(Fighter { max_hp: 30, hp: 30, xp: 100, defense: 2, power: 8, on_death: DeathCallback::Monster });
                     troll.ai = Some(Ai::Basic);
                     troll
                 },
                 "ogre" => {
                     let mut ogre = Object::new(x, y, 'O', "ogre", colors::WHITE, true);
-                    ogre.fighter = Some(Fighter { max_hp: 25, hp: 25, xp: 250, defense: 2, power: 5, on_death: DeathCallback::Monster });
+                    ogre.fighter = Some(Fighter { max_hp: 70, hp: 70, xp: 250, defense: 2, power: 12, on_death: DeathCallback::Monster });
                     ogre.ai = Some(Ai::Basic);
                     ogre
                 },
@@ -860,13 +885,28 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
 
     let item_chances = &mut [
         Weighted { weight: 70, item: Item::Heal },
-        Weighted { weight: 12, item: Item::Lightning },
-        Weighted { weight: 10, item: Item::Confuse },
-        Weighted { weight: 8, item: Item::Fireball },
+        Weighted { 
+            weight: from_dungeon_level(&[Transition { level: 2, value: 25 }], level),
+            item: Item::Lightning 
+        },
+        Weighted { 
+            weight: 10, 
+            item: Item::Confuse 
+        },
+        Weighted { 
+            weight: from_dungeon_level(&[Transition{ level: 5, value: 25 }], level), 
+            item: Item::Fireball 
+        },
     ];
     let item_choice = WeightedChoice::new(item_chances);
 
-    let num_items = rand::thread_rng().gen_range(0, MAX_ROOM_ITEMS + 1);
+    let max_items = from_dungeon_level(&[
+        Transition { level: 1, value: 1 },
+        Transition { level: 3, value: 2 },
+        Transition { level: 5, value: 3 },
+    ], level);
+
+    let num_items = rand::thread_rng().gen_range(0, max_items + 1);
     for _ in 0..num_items {
         let x = rand::thread_rng().gen_range(room.x1 + 1, room.x2);
         let y = rand::thread_rng().gen_range(room.y1 + 1, room.y2);
@@ -947,7 +987,7 @@ fn ai_confused(monster_id: usize, game: &mut Game, objects: &mut [Object], previ
     }
 }
 
-fn make_map(objects: &mut Vec<Object>) -> Map {
+fn make_map(level: u32, objects: &mut Vec<Object>) -> Map {
     let mut map = vec![vec![Tile::wall(); MAP_HEIGHT as usize]; MAP_WIDTH as usize];
 
     let mut rooms = vec![];
@@ -960,7 +1000,7 @@ fn make_map(objects: &mut Vec<Object>) -> Map {
         let failed = rooms.iter().any(|other_room| new_room.intersects_with(other_room));
         if !failed {
             create_room(new_room, &mut map);
-            place_objects(new_room, &map, objects);
+            place_objects(level, new_room, &map, objects);
             let (new_x, new_y) = new_room.center();
             if rooms.is_empty() {
                 objects[PLAYER].set_pos(new_x, new_y);
@@ -1005,15 +1045,15 @@ fn new_game(tcod: &mut Tcod) -> (Vec<Object>, Game) {
     let mut player = Object::new(0, 0, '@', "Balin", colors::WHITE, true);
     player.alive = true;
     player.fighter = Some(Fighter { 
-        max_hp: 30, 
-        hp: 30,
+        max_hp: 100, 
+        hp: 100,
         xp: 0,
-        defense: 2, 
-        power: 5,
+        defense: 1, 
+        power: 4,
         on_death: DeathCallback::Player });
     let mut objects = vec![ player ];
     let mut game = Game {
-        map: make_map(&mut objects),
+        map: make_map(1, &mut objects),
         log: vec![],
         inventory: vec![],
         dungeon_level: 1,
