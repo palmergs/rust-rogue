@@ -125,6 +125,7 @@ struct Object {
     fighter: Option<Fighter>,
     ai: Option<Ai>,
     item: Option<Item>,
+    equipment: Option<Equipment>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, RustcEncodable, RustcDecodable)]
@@ -143,12 +144,14 @@ enum Item {
     Lightning,
     Fireball,
     Confuse,
+    Equipment,
     Corpse,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum UseResult {
     UsedUp,
+    UsedAndKept,
     Cancelled,
 }
 
@@ -175,8 +178,36 @@ fn next_level(tcod: &mut Tcod, objects: &mut Vec<Object>, game: &mut Game) {
     initialize_fov(&game.map, tcod);
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, RustcDecodable, RustcEncodable)]
+struct Equipment {
+    slot: Slot,
+    equipped: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, RustcDecodable, RustcEncodable)]
+enum Slot {
+    LeftHand,
+    RightHand,
+    Head,
+}
+
+impl std::fmt::Display for Slot {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match *self {
+            Slot::LeftHand => write!(f, "left hand"),
+            Slot::RightHand => write!(f, "right hand"),
+            Slot::Head => write!(f, "head"),
+        }
+    }
+}
+
 fn drop_item(inventory_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
     let mut item = game.inventory.remove(inventory_id);
+
+    if item.equipment.is_some() {
+        item.dequip(&mut game.log);
+    }
+
     item.set_pos(objects[PLAYER].x, objects[PLAYER].y);
     game.log.add(format!("You dropped a {}", item.name), colors::YELLOW);
     objects.push(item);
@@ -189,7 +220,16 @@ fn pick_item_up(object_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
     } else {
         let item = objects.swap_remove(object_id);
         game.log.add(format!("You picked up a {}!", item.name), colors::GREEN);
+
+        let index = game.inventory.len();
+        let slot = item.equipment.map(|e| e.slot);
         game.inventory.push(item);
+
+        if let Some(slot) = slot {
+            if get_equipped_in_slot(slot, &game.inventory).is_none() {
+                game.inventory[index].equip(&mut game.log);
+            }
+        }
     }
 }
 
@@ -201,11 +241,13 @@ fn use_item(inventory_id: usize, game: &mut Game, objects: &mut [Object], tcod: 
             Item::Fireball => cast_fireball,
             Item::Confuse => cast_confuse,
             Item::Corpse => eat_corpse,
+            Item::Equipment => toggle_equipment,
         };
         match on_use(inventory_id, objects, game, tcod) {
             UseResult::UsedUp => {
                 game.inventory.remove(inventory_id);
-            }
+            },
+            UseResult::UsedAndKept => {},
             UseResult::Cancelled => {
                 game.log.add("Cancelled", colors::WHITE);
             }
@@ -213,6 +255,33 @@ fn use_item(inventory_id: usize, game: &mut Game, objects: &mut [Object], tcod: 
     } else {
         game.log.add(format!("The {} cannot be used.", game.inventory[inventory_id].name), colors::WHITE);
     }
+}
+
+fn get_equipped_in_slot(slot: Slot, inventory: &[Object]) -> Option<usize> {
+    for (inventory_id, item) in inventory.iter().enumerate() {
+        if item.equipment.as_ref().map_or(false, |e| e.equipped && e.slot == slot) {
+            return Some(inventory_id)
+        }
+    }
+    None
+}
+
+fn toggle_equipment(inventory_id: usize, _objects: &mut [Object], game: &mut Game, _tcod: &mut Tcod) -> UseResult {
+    let equipment = match game.inventory[inventory_id].equipment {
+        Some(equipment) => equipment,
+        None => return UseResult::Cancelled,
+    };
+
+    if equipment.equipped {
+        game.inventory[inventory_id].dequip(&mut game.log);
+    } else {
+
+        if let Some(old_equipment) = get_equipped_in_slot(equipment.slot, &game.inventory) {
+            game.inventory[old_equipment].dequip(&mut game.log);
+        }
+        game.inventory[inventory_id].equip(&mut game.log);
+    }
+    UseResult::UsedAndKept
 }
 
 fn closest_monster(max_range: i32, objects: &mut [Object], tcod: &Tcod) -> Option<usize> {
@@ -344,6 +413,39 @@ impl Object {
             fighter: None,
             ai: None,
             item: None,
+            equipment: None,
+        }
+    }
+
+    pub fn equip(&mut self, log: &mut Vec<(String, Color)>) {
+        if self.item.is_none() {
+            log.add(format!("Can't equip {:?} because it is not an Item.", self), colors::RED);
+            return
+        };
+
+        if let Some(ref mut equipment) = self.equipment {
+            if !equipment.equipped {
+                equipment.equipped = true;
+                log.add(format!("Equipped {} on {}.", self.name, equipment.slot), colors::LIGHT_GREEN);
+            }
+        } else {
+            log.add(format!("Can't equip {:?} because it is not an Equipment.", self), colors::RED);
+        }
+    }
+
+    pub fn dequip(&mut self, log: &mut Vec<(String, Color)>) {
+        if self.item.is_none() {
+            log.add(format!("Can't dequip {:?} because it is not an Item.", self), colors::RED);
+            return
+        };
+
+        if let Some(ref mut equipment) = self.equipment {
+            if equipment.equipped {
+                equipment.equipped = false;
+                log.add(format!("Dequipped {} from {}.", self.name, equipment.slot), colors::LIGHT_YELLOW);
+            }
+        } else {
+            log.add(format!("Can't dequip {:?} because it is not an Equipment.", self), colors::RED);
         }
     }
 
@@ -497,7 +599,14 @@ fn inventory_menu(inventory: &[Object], header: &str, root: &mut Root) -> Option
     let options = if inventory.len() == 0 {
         vec!["Inventory is empty.".into()]
     } else {
-        inventory.iter().map(|item| { item.name.clone() }).collect()
+        inventory.iter().map(|item| { 
+            match item.equipment {
+                Some(equipment) if equipment.equipped => {
+                    format!("{} (on {})", item.name, equipment.slot)
+                }
+                _ => item.name.clone() 
+            }
+        }).collect()
     };
 
     let inventory_index = menu(header, &options, INVENTORY_WIDTH, root);
@@ -885,6 +994,7 @@ fn place_objects(level: u32, room: Rect, map: &Map, objects: &mut Vec<Object>) {
 
     let item_chances = &mut [
         Weighted { weight: 70, item: Item::Heal },
+        Weighted { weight: 1000, item: Item::Equipment },
         Weighted { 
             weight: from_dungeon_level(&[Transition { level: 2, value: 25 }], level),
             item: Item::Lightning 
@@ -912,6 +1022,12 @@ fn place_objects(level: u32, room: Rect, map: &Map, objects: &mut Vec<Object>) {
         let y = rand::thread_rng().gen_range(room.y1 + 1, room.y2);
         if !is_blocked(x, y, map, objects) {
             let item = match item_choice.ind_sample(&mut rand::thread_rng()) {
+                Item::Equipment => {
+                    let mut object = Object::new(x, y, '/', "sword", colors::SKY, false);
+                    object.item = Some(Item::Equipment);
+                    object.equipment = Some(Equipment { equipped: false, slot: Slot::RightHand });
+                    object
+                },
                 Item::Heal => {
                     let mut object = Object::new(x, y, '!', "healing potion", colors::VIOLET, false);
                     object.item = Some(Item::Heal);
