@@ -696,19 +696,19 @@ fn handle_keys(key: Key, tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Obj
 
     let player_alive = objects[PLAYER].alive;
     match (key, player_alive) {
-        (Key { code: Up, .. }, true) => {
+        (Key { code: Up, .. }, true) | (Key { code: NumPad8, .. }, true) => {
             player_move_or_attack(0, -1, game, objects);
             PlayerAction::TookTurn
         },
-        (Key { code: Down, .. }, true) => {
+        (Key { code: Down, .. }, true) | (Key { code: NumPad2, .. }, true) => {
             player_move_or_attack(0, 1, game, objects);
             PlayerAction::TookTurn
         },
-        (Key { code: Left, .. }, true) => {
+        (Key { code: Left, .. }, true) | (Key { code: NumPad4, .. }, true) => {
             player_move_or_attack(-1, 0, game, objects);
             PlayerAction::TookTurn
         },
-        (Key { code: Right, .. }, true) => {
+        (Key { code: Right, .. }, true) | (Key { code: NumPad6, .. }, true) => {
             player_move_or_attack(1, 0, game, objects);
             PlayerAction::TookTurn
         },
